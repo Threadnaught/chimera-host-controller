@@ -33,7 +33,8 @@ with serial.Serial('/dev/ttyUSB0', 115200, timeout=0, rtscts=True) as ser:
 				current_quats = np.asarray([float(x) for x in most_recent_split]).reshape([3,4])
 				if base_quats is None and datetime.datetime.now() > get_base_at:
 					base_quats = current_quats
-				# print(current_quats)
 				if not base_quats is None:
-					dot_product = np.dot(base_quats[0], current_quats[0])
-					print('leftarm angle moved since start:', np.arccos(np.clip(dot_product, -1.0, 1.0)) * 360 / (np.pi))
+					print('leftarm angle moved since start:', np.arccos(np.clip(np.dot(base_quats[0], current_quats[0]), -1.0, 1.0)) * 360 / (2 * np.pi))
+					print('torso angle moved since start:', np.arccos(np.clip(np.dot(base_quats[1], current_quats[1]), -1.0, 1.0)) * 360 / (2 * np.pi))
+					print('rightarm angle moved since start:', np.arccos(np.clip(np.dot(base_quats[2], current_quats[2]), -1.0, 1.0)) * 360 / (2 * np.pi))
+					
