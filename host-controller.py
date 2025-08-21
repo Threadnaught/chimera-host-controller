@@ -13,27 +13,21 @@ print("Press ctrl+\ to quit process.")
 
 idle_pos = np.asarray([-0.1,-0.4,-0.25,0.2,-0.2,0.55])
 
-def goto_idle(arm):
-    #arm.loopOn()
-    #arm.labelRun("forward")
-    #time.sleep(0.5)
-    #arm.MoveJ(idle_pos, 0, 1)
-    gripper_pos = 0.0
-    jnt_speed = 1.0
-    arm.MoveL(idle_pos, gripper_pos, 0.1)
-    #arm.setFsmLowcmd()
-    #arm.loopOff()
+# def goto_idle(arm):
+#     arm.MoveL(idle_pos, 0.0, 0.1)
 
 def goto_forward(arm):
-    #arm.loopOn()
     arm.labelRun("forward")
 
 def goto_flat(arm):
-    #arm.loopOn()
-    #arm.labelRun("forward")
-    #time.sleep(0.5)
     arm.labelRun("startFlat")
-    #arm.loopOff()
+
+
+def approach_z_offset(arm, desired_z_offset, strength):
+    offset_from_target = (idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
+    vel_inc_gripper = np.concatenate((offset_from_target * strength, [0]))
+    arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
+
 
 def get_end_posture(arm):
     return unitree_arm_interface.homoToPosture(
@@ -74,7 +68,7 @@ while True:
                 elif command == "idle":
                     if mode == "flat":
                         goto_forward(arm1)
-                    goto_idle(arm1)
+                    # goto_idle(arm1)
                     mode = "idle"
                 elif command == "run":
                     if mode != "idle":
@@ -95,30 +89,28 @@ while True:
                     most_recent_serial_line = lines[-2].decode('ascii').strip(', \r\n')
                     if most_recent_serial_line == "HOLD" and mode == "run":
                         print("Switching to idle due to HOLD command")
-                        goto_idle(arm1)
+                        # goto_idle(arm1)
                         mode = "idle"
                     most_recent_serial_time = datetime.datetime.now()
 
         if mode == "run":
             if (datetime.datetime.now() - most_recent_serial_time) > datetime.timedelta(seconds=0.1):
                 print("Switching to idle due to loss of communication with microcontroller")
-                goto_idle(arm1)
+                # goto_idle(arm1)
                 mode = "idle"
             
             angle = float(most_recent_serial_line.split(",")[2])
-            desired_z_offset = -min(abs(angle) / 300, 0.2)
+            desired_z_offset = -min(abs(angle) / 600, 0.2)
             
-            current_z_offset = get_end_posture(arm1)[5] - idle_pos[5]
+            approach_z_offset(arm1, desired_z_offset, 2.5)
+            
+        elif mode == "idle":
+            approach_z_offset(arm1, 0, 2.5)
 
-            z_vel = (desired_z_offset - current_z_offset) * 10
-
-            # Params are [roll, pitch, yaw, x, y, z, gripper]
-            #arm1.cartesianCtrlCmd(target_pos, 0.05, 1)
-            arm1.cartesianCtrlCmd([0,0,0,0,0,z_vel,0], 0.05, 1)
         time.sleep(1/500)
     except Exception as e:
         print("Returning to idle due to exception:", e)
-        goto_idle(arm1)
+        # goto_idle(arm1)
         mode = "idle"
 
 
