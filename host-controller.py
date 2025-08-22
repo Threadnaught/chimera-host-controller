@@ -12,7 +12,7 @@ np.set_printoptions(precision=3, suppress=True)
 print("Press ctrl+\ to quit process.")
 
 #roll, pitch, yaw, x, y, z
-idle_pos = np.asarray([-0.1,-0.4,-0.25,0.2,0.3,0.45])
+idle_pos = np.asarray([-0.1,-0.4,-0.25,0.25,0.35,0.35])
 
 def goto_forward():
     arm0.labelRun("forward")
@@ -149,11 +149,11 @@ while True:
             
 
             angle_left = float(most_recent_serial_line.split(",")[0])
-            desired_z_offset_left = -min(abs(angle_left) / 600, 0.2)
+            desired_z_offset_left = -min(abs(angle_left) / 300, 0.3)
             angle_right = float(most_recent_serial_line.split(",")[2])
-            desired_z_offset_right = -min(abs(angle_right) / 600, 0.2)
+            desired_z_offset_right = -min(abs(angle_right) / 300, 0.3)
             
-            approach_z_offset_both([desired_z_offset_left, desired_z_offset_right], 5)
+            approach_z_offset_both([desired_z_offset_left, desired_z_offset_right], 10)
 
         elif mode == "idle":
             approach_z_offset_both([0, 0], 2.5)
