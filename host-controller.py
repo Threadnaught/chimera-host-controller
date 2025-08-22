@@ -11,26 +11,53 @@ np.set_printoptions(precision=3, suppress=True)
 
 print("Press ctrl+\ to quit process.")
 
-idle_pos = np.asarray([-0.1,-0.4,-0.25,0.2,0.2,0.55])
-
+#roll, pitch, yaw, x, y, z
+idle_pos = np.asarray([-0.1,-0.4,-0.25,0.2,0.3,0.45])
 
 def goto_forward():
     arm0.labelRun("forward")
     arm1.labelRun("forward")
 
+def goto_idle():
+    return
+    arm0.MoveL(idle_pos, 0, 0.5)
+    arm1.MoveL(idle_pos * [1,1,1,1,-1,1], 0, 0.5)
+
 def goto_flat():
     arm0.labelRun("startFlat")
     arm1.labelRun("startFlat")
 
+i = 0
+
+#Low pass filter to avoid the shakes
+joint_cmds_moving_average = {True:np.zeros([7]), False:np.zeros([7])}
 
 def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
+    global i, joint_cmds_moving_average
     flipped_idle_pos = idle_pos
     if flip_y:
         flipped_idle_pos = flipped_idle_pos * [1,1,1,1,-1,1]
 
     offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
-    vel_inc_gripper = np.concatenate((offset_from_target * strength, [0]))
-    arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
+
+    joint_space_motion = arm._ctrlComp.armModel.solveQP(
+        offset_from_target * strength,
+        arm.lowstate.getQ(),
+        arm._ctrlComp.dt
+    )
+
+    # roll, pitch, yaw, x, y, z, gripper
+    vel_inc_gripper = np.concatenate((joint_space_motion, [0]))
+
+    i = (i+1) % 500
+    if i == 0 or i == 1:
+        # print('flip:', flip_y, 'desired offset', desired_z_offset, ' target offset:', offset_from_target)
+        print('required joint movement', vel_inc_gripper)
+
+    joint_cmds_moving_average[flip_y] = (joint_cmds_moving_average[flip_y] * 0.99) + (vel_inc_gripper * 0.01)
+
+    # arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
+    arm.jointCtrlCmd(joint_cmds_moving_average[flip_y], 0.5)
 
 def approach_z_offset_both(desired_z_offsets, strength):
     approach_z_offset_single(arm0, desired_z_offsets[0], strength, False)
@@ -82,6 +109,7 @@ while True:
                     if mode == "flat":
                         goto_forward()
                     mode = "idle"
+                    goto_idle()
 
                 elif command == "run":
                     if mode != "idle":
@@ -106,6 +134,7 @@ while True:
                     if most_recent_serial_line == "HOLD" and mode == "run":
                         print("Switching to idle due to HOLD command")
                         mode = "idle"
+                        goto_idle()
                     most_recent_serial_time = datetime.datetime.now()
 
         # Apply per cycle instructions if needed:
@@ -116,18 +145,21 @@ while True:
 
                 print("Switching to idle due to loss of communication with microcontroller")
                 mode = "idle"
+                goto_idle()
             
-            angle = float(most_recent_serial_line.split(",")[2])
-            desired_z_offset = -min(abs(angle) / 600, 0.2)
 
-            # print(desired_z_offset)
+            angle_left = float(most_recent_serial_line.split(",")[0])
+            desired_z_offset_left = -min(abs(angle_left) / 600, 0.2)
+            angle_right = float(most_recent_serial_line.split(",")[2])
+            desired_z_offset_right = -min(abs(angle_right) / 600, 0.2)
             
-            approach_z_offset_both([-0.05, -0.05], 2.5)
+            approach_z_offset_both([desired_z_offset_left, desired_z_offset_right], 5)
 
         elif mode == "idle":
-            approach_z_offset_both([0, 0], 5)
+            approach_z_offset_both([0, 0], 2.5)
 
         time.sleep(1/500)
     except Exception as e:
         print("Returning to idle due to exception:", e)
         mode = "idle"
+        goto_idle()
