@@ -7,30 +7,37 @@ import datetime
 import sys
 import select
 
-np.set_printoptions(precision=3, suppress=True)
+armState = unitree_arm_interface.ArmFSMState
+
+np.set_printoptions(precision=2, suppress=True)
 
 print("Press ctrl+\ to quit process.")
 
 #roll, pitch, yaw, x, y, z
-idle_pos = np.asarray([-0.1,-0.4,-0.25,0.25,0.35,0.35])
+idle_pos = np.asarray([-0.1,-0.4,-0.25,0.25,0.35,0.4])
 
 def goto_forward():
+    # arm0.startTrack(armState.JOINTCTRL)
+    # arm1.startTrack(armState.JOINTCTRL)
+    arm0.loopOn()
     arm0.labelRun("forward")
+    arm1.loopOn()
     arm1.labelRun("forward")
 
-def goto_idle():
-    return
-    arm0.MoveL(idle_pos, 0, 0.5)
-    arm1.MoveL(idle_pos * [1,1,1,1,-1,1], 0, 0.5)
 
 def goto_flat():
+    # arm0.startTrack(armState.JOINTCTRL)
+    # arm1.startTrack(armState.JOINTCTRL)
+    arm0.loopOn()
     arm0.labelRun("startFlat")
+    arm1.loopOn()
     arm1.labelRun("startFlat")
 
 i = 0
 
 #Low pass filter to avoid the shakes
 joint_cmds_moving_average = {True:np.zeros([7]), False:np.zeros([7])}
+arm_target_qs = {True:np.zeros([6]), False:np.zeros([6])}
 
 def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     global i, joint_cmds_moving_average
@@ -38,7 +45,18 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     if flip_y:
         flipped_idle_pos = flipped_idle_pos * [1,1,1,1,-1,1]
 
-    offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
+    offset_from_target = (flipped_idle_pos + [0,0,0,0,desired_z_offset,0]) - get_end_posture(arm)
+
+    # vel_inc_gripper_cartesian = np.concatenate((offset_from_target * strength, [0]))
+    # arm.cartesianCtrlCmd(vel_inc_gripper_cartesian, 0.05, 0.5)
+
+
+    i = (i+1) % 500
+    if i == 0 or i == 1:
+        print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
+        end = '\n' if flip_y else ' ')
+        
+    # return
 
     joint_space_motion = arm._ctrlComp.armModel.solveQP(
         offset_from_target * strength,
@@ -46,22 +64,50 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
         arm._ctrlComp.dt
     )
 
+
+    qd = arm._ctrlComp.armModel.solveQP(
+        offset_from_target * strength,
+        arm.lowstate.getQ(),
+        arm._ctrlComp.dt
+    )
+    
+    arm_target_qs[flip_y] += qd * arm._ctrlComp.dt
+    
+    tau = arm._ctrlComp.armModel.inverseDynamics(arm.lowstate.getQ(), qd, np.zeros(6), np.zeros(6))
+    
+    arm.setArmCmd(arm_target_qs[flip_y], qd, tau)
+    
+    arm.sendRecv()
+
+
+
+
+
+
+
+
+
+
+    return
+
     # roll, pitch, yaw, x, y, z, gripper
     vel_inc_gripper = np.concatenate((joint_space_motion, [0]))
 
     i = (i+1) % 500
     if i == 0 or i == 1:
-        # print('flip:', flip_y, 'desired offset', desired_z_offset, ' target offset:', offset_from_target)
-        print('required joint movement', vel_inc_gripper)
+        print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
+        end = '\n' if flip_y else ' ')
+        # print('required joint movement', vel_inc_gripper)
 
-    joint_cmds_moving_average[flip_y] = (joint_cmds_moving_average[flip_y] * 0.99) + (vel_inc_gripper * 0.01)
+    joint_cmds_moving_average[flip_y] = (joint_cmds_moving_average[flip_y] * 0.995) + (vel_inc_gripper * 0.01)
 
     # arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
     arm.jointCtrlCmd(joint_cmds_moving_average[flip_y], 0.5)
 
 def approach_z_offset_both(desired_z_offsets, strength):
     approach_z_offset_single(arm0, desired_z_offsets[0], strength, False)
-    approach_z_offset_single(arm1, desired_z_offsets[1], strength, True)
+    # TODO UNCOMMENT ME
+    # approach_z_offset_single(arm1, desired_z_offsets[1], strength, True)
 
 
 def get_end_posture(arm):
@@ -70,6 +116,8 @@ def get_end_posture(arm):
             arm.lowstate.getQ(), 6)
     )
   
+def determine_z_offset(angle):
+    return -min(abs(angle) / 400, 0.25)
 
 # arm config
 ARM_1_UDP = unitree_arm_interface.UDPPort("127.0.0.1", 8073, 8074, unitree_arm_interface.RECVSTATE_LENGTH, unitree_arm_interface.BlockYN.NO, 500000)
@@ -108,8 +156,14 @@ while True:
                 elif command == "idle":
                     if mode == "flat":
                         goto_forward()
+                    # arm0.startTrack(armState.CARTESIAN)
+                    # arm1.startTrack(armState.CARTESIAN)
+                    arm_target_qs = {False:arm0.lowstate.getQ(), True:arm1.lowstate.getQ()}
+                    arm0.setFsmLowcmd()
+                    
+                    # TODO UNCOMMENT ME
+                    # arm1.setFsmLowcmd()
                     mode = "idle"
-                    goto_idle()
 
                 elif command == "run":
                     if mode != "idle":
@@ -134,7 +188,6 @@ while True:
                     if most_recent_serial_line == "HOLD" and mode == "run":
                         print("Switching to idle due to HOLD command")
                         mode = "idle"
-                        goto_idle()
                     most_recent_serial_time = datetime.datetime.now()
 
         # Apply per cycle instructions if needed:
@@ -145,15 +198,13 @@ while True:
 
                 print("Switching to idle due to loss of communication with microcontroller")
                 mode = "idle"
-                goto_idle()
             
-
-            angle_left = float(most_recent_serial_line.split(",")[0])
-            desired_z_offset_left = -min(abs(angle_left) / 300, 0.3)
-            angle_right = float(most_recent_serial_line.split(",")[2])
-            desired_z_offset_right = -min(abs(angle_right) / 300, 0.3)
+            serial_split = [float(x) for x in most_recent_serial_line.split(",")]
             
-            approach_z_offset_both([desired_z_offset_left, desired_z_offset_right], 10)
+            approach_z_offset_both([
+                determine_z_offset(serial_split[0]),
+                determine_z_offset(serial_split[2])
+            ], 10)
 
         elif mode == "idle":
             approach_z_offset_both([0, 0], 2.5)
@@ -162,4 +213,3 @@ while True:
     except Exception as e:
         print("Returning to idle due to exception:", e)
         mode = "idle"
-        goto_idle()
