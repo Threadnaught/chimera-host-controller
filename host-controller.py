@@ -37,7 +37,9 @@ i = 0
 
 #Low pass filter to avoid the shakes
 joint_cmds_moving_average = {True:np.zeros([7]), False:np.zeros([7])}
-arm_target_qs = {True:np.zeros([6]), False:np.zeros([6])}
+
+arm_target_qs = {False:np.zeros([6]), True:np.zeros([6])}
+arm_target_qds = {False:np.zeros([6]), True:np.zeros([6])}
 
 def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     global i, joint_cmds_moving_average
@@ -45,7 +47,7 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     if flip_y:
         flipped_idle_pos = flipped_idle_pos * [1,1,1,1,-1,1]
 
-    offset_from_target = (flipped_idle_pos + [0,0,0,0,desired_z_offset,0]) - get_end_posture(arm)
+    offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
 
     # vel_inc_gripper_cartesian = np.concatenate((offset_from_target * strength, [0]))
     # arm.cartesianCtrlCmd(vel_inc_gripper_cartesian, 0.05, 0.5)
@@ -65,23 +67,33 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     )
 
 
-    qd = arm._ctrlComp.armModel.solveQP(
+    unfiltered_target_qd = arm._ctrlComp.armModel.solveQP(
         offset_from_target * strength,
         arm.lowstate.getQ(),
         arm._ctrlComp.dt
     )
+
+    new_target_qd = (arm_target_qds[flip_y] * 0.995) + (unfiltered_target_qd * 0.005)
+
+    qdd = (new_target_qd - arm_target_qds[flip_y]) / arm._ctrlComp.dt
+
+    arm_target_qds[flip_y] = new_target_qd
     
-    arm_target_qs[flip_y] += qd * arm._ctrlComp.dt
+    arm_target_qs[flip_y] += arm_target_qds[flip_y] * arm._ctrlComp.dt
     
-    tau = arm._ctrlComp.armModel.inverseDynamics(arm.lowstate.getQ(), qd, np.zeros(6), np.zeros(6))
+    tau = arm._ctrlComp.armModel.inverseDynamics(arm.lowstate.getQ(), arm_target_qds[flip_y], qdd, np.zeros(6))
     
-    arm.setArmCmd(arm_target_qs[flip_y], qd, tau)
+    arm.setArmCmd(arm_target_qs[flip_y], arm_target_qds[flip_y], tau)
     
     arm.sendRecv()
 
 
 
 
+    i = (i+1) % 500
+    if i == 0 or i == 1:
+        print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
+        end = '\n' if flip_y else ' ')
 
 
 
@@ -106,8 +118,7 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
 
 def approach_z_offset_both(desired_z_offsets, strength):
     approach_z_offset_single(arm0, desired_z_offsets[0], strength, False)
-    # TODO UNCOMMENT ME
-    # approach_z_offset_single(arm1, desired_z_offsets[1], strength, True)
+    approach_z_offset_single(arm1, desired_z_offsets[1], strength, True)
 
 
 def get_end_posture(arm):
@@ -160,9 +171,7 @@ while True:
                     # arm1.startTrack(armState.CARTESIAN)
                     arm_target_qs = {False:arm0.lowstate.getQ(), True:arm1.lowstate.getQ()}
                     arm0.setFsmLowcmd()
-                    
-                    # TODO UNCOMMENT ME
-                    # arm1.setFsmLowcmd()
+                    arm1.setFsmLowcmd()
                     mode = "idle"
 
                 elif command == "run":
@@ -204,10 +213,10 @@ while True:
             approach_z_offset_both([
                 determine_z_offset(serial_split[0]),
                 determine_z_offset(serial_split[2])
-            ], 10)
+            ], 5)
 
         elif mode == "idle":
-            approach_z_offset_both([0, 0], 2.5)
+            approach_z_offset_both([0, 0], 2)
 
         time.sleep(1/500)
     except Exception as e:
