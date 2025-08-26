@@ -16,11 +16,7 @@ print("Press ctrl+\ to quit process.")
 #roll, pitch, yaw, x, y, z
 idle_pos = np.asarray([-0.1,-0.4,-0.25,0.25,0.35,0.4])
 
-# left_arm_correction = np.asarray([0, -0.04, -0.03, -0.09, -0, -0.08])
-
 def goto_forward():
-    # arm0.startTrack(armState.JOINTCTRL)
-    # arm1.startTrack(armState.JOINTCTRL)
     arm0.loopOn()
     arm0.labelRun("forward")
     arm1.loopOn()
@@ -28,8 +24,6 @@ def goto_forward():
 
 
 def goto_flat():
-    # arm0.startTrack(armState.JOINTCTRL)
-    # arm1.startTrack(armState.JOINTCTRL)
     arm0.loopOn()
     arm0.labelRun("startFlat")
     arm1.loopOn()
@@ -48,23 +42,8 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     flipped_idle_pos = idle_pos
     if flip_y:
         flipped_idle_pos = flipped_idle_pos * [1,1,1,1,-1,1]
-    # else:
-    #     flipped_idle_pos = flipped_idle_pos - left_arm_correction
 
     offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
-
-
-    i = (i+1) % 500
-    if i == 0 or i == 1:
-        print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
-        end = '\n' if flip_y else ' ')
-
-    joint_space_motion = arm._ctrlComp.armModel.solveQP(
-        offset_from_target * strength,
-        arm.lowstate.getQ(),
-        arm._ctrlComp.dt
-    )
-
 
     unfiltered_target_qd = arm._ctrlComp.armModel.solveQP(
         offset_from_target * strength,
@@ -72,32 +51,23 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
         arm._ctrlComp.dt
     )
 
-    new_target_qd = (arm_target_qds[flip_y] * 0.99) + (unfiltered_target_qd * 0.01)
-    new_target_qd = np.clip(new_target_qd, -0.5, 0.5)
+    new_target_qd = (arm_target_qds[flip_y] * 0.9925) + (unfiltered_target_qd * 0.0075)
+    new_target_qd = np.clip(new_target_qd, -2, 2)
 
     qdd = (new_target_qd - arm_target_qds[flip_y]) / arm._ctrlComp.dt
-
-    arm_target_qds[flip_y] = new_target_qd
     
+    arm_target_qds[flip_y] = new_target_qd
     arm_target_qs[flip_y] += arm_target_qds[flip_y] * arm._ctrlComp.dt
     
     tau = arm._ctrlComp.armModel.inverseDynamics(arm.lowstate.getQ(), arm_target_qds[flip_y], qdd, np.zeros(6))
     
     arm.setArmCmd(arm_target_qs[flip_y], arm_target_qds[flip_y], tau)
-    
     arm.sendRecv()
-
-
-
 
     i = (i+1) % 500
     if i == 0 or i == 1:
         print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
         end = '\n' if flip_y else ' ')
-
-
-
-
 
 
 def approach_z_offset_both(desired_z_offsets, strength):
@@ -151,8 +121,6 @@ while True:
                 elif command == "idle":
                     if mode == "flat":
                         goto_forward()
-                    # arm0.startTrack(armState.CARTESIAN)
-                    # arm1.startTrack(armState.CARTESIAN)
                     arm_target_qs = {False:arm0.lowstate.getQ(), True:arm1.lowstate.getQ()}
                     arm0.setFsmLowcmd()
                     arm1.setFsmLowcmd()
@@ -197,7 +165,7 @@ while True:
             approach_z_offset_both([
                 determine_z_offset(serial_split[0]),
                 determine_z_offset(serial_split[2])
-            ], 7.5)
+            ], 5)
 
         elif mode == "idle":
             approach_z_offset_both([0, 0], 2.5)
