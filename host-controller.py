@@ -16,6 +16,8 @@ print("Press ctrl+\ to quit process.")
 #roll, pitch, yaw, x, y, z
 idle_pos = np.asarray([-0.1,-0.4,-0.25,0.25,0.35,0.4])
 
+# left_arm_correction = np.asarray([0, -0.04, -0.03, -0.09, -0, -0.08])
+
 def goto_forward():
     # arm0.startTrack(armState.JOINTCTRL)
     # arm1.startTrack(armState.JOINTCTRL)
@@ -46,19 +48,16 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     flipped_idle_pos = idle_pos
     if flip_y:
         flipped_idle_pos = flipped_idle_pos * [1,1,1,1,-1,1]
+    # else:
+    #     flipped_idle_pos = flipped_idle_pos - left_arm_correction
 
     offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
-
-    # vel_inc_gripper_cartesian = np.concatenate((offset_from_target * strength, [0]))
-    # arm.cartesianCtrlCmd(vel_inc_gripper_cartesian, 0.05, 0.5)
 
 
     i = (i+1) % 500
     if i == 0 or i == 1:
         print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
         end = '\n' if flip_y else ' ')
-        
-    # return
 
     joint_space_motion = arm._ctrlComp.armModel.solveQP(
         offset_from_target * strength,
@@ -73,7 +72,8 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
         arm._ctrlComp.dt
     )
 
-    new_target_qd = (arm_target_qds[flip_y] * 0.995) + (unfiltered_target_qd * 0.005)
+    new_target_qd = (arm_target_qds[flip_y] * 0.99) + (unfiltered_target_qd * 0.01)
+    new_target_qd = np.clip(new_target_qd, -0.5, 0.5)
 
     qdd = (new_target_qd - arm_target_qds[flip_y]) / arm._ctrlComp.dt
 
@@ -100,22 +100,6 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
 
 
 
-    return
-
-    # roll, pitch, yaw, x, y, z, gripper
-    vel_inc_gripper = np.concatenate((joint_space_motion, [0]))
-
-    i = (i+1) % 500
-    if i == 0 or i == 1:
-        print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
-        end = '\n' if flip_y else ' ')
-        # print('required joint movement', vel_inc_gripper)
-
-    joint_cmds_moving_average[flip_y] = (joint_cmds_moving_average[flip_y] * 0.995) + (vel_inc_gripper * 0.01)
-
-    # arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
-    arm.jointCtrlCmd(joint_cmds_moving_average[flip_y], 0.5)
-
 def approach_z_offset_both(desired_z_offsets, strength):
     approach_z_offset_single(arm0, desired_z_offsets[0], strength, False)
     approach_z_offset_single(arm1, desired_z_offsets[1], strength, True)
@@ -128,7 +112,7 @@ def get_end_posture(arm):
     )
   
 def determine_z_offset(angle):
-    return -min(abs(angle) / 400, 0.25)
+    return -min(abs(angle) / 350, 0.3)
 
 # arm config
 ARM_1_UDP = unitree_arm_interface.UDPPort("127.0.0.1", 8073, 8074, unitree_arm_interface.RECVSTATE_LENGTH, unitree_arm_interface.BlockYN.NO, 500000)
@@ -213,10 +197,10 @@ while True:
             approach_z_offset_both([
                 determine_z_offset(serial_split[0]),
                 determine_z_offset(serial_split[2])
-            ], 5)
+            ], 7.5)
 
         elif mode == "idle":
-            approach_z_offset_both([0, 0], 2)
+            approach_z_offset_both([0, 0], 2.5)
 
         time.sleep(1/500)
     except Exception as e:
