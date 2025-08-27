@@ -14,7 +14,7 @@ np.set_printoptions(precision=2, suppress=True)
 print("Press ctrl+\ to quit process.")
 
 #roll, pitch, yaw, x, y, z
-idle_pos = np.asarray([-0.1,-0.4,-0.25,0.25,0.35,0.4])
+idle_pos = np.asarray([-0.1,-0.4,-0.25,0.25,0.3,0.4])
 
 def goto_forward():
     arm0.loopOn()
