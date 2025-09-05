@@ -41,7 +41,7 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
     global i, joint_cmds_moving_average
     flipped_idle_pos = idle_pos
     if flip_y:
-        flipped_idle_pos = flipped_idle_pos * [1,1,1,1,-1,1]
+        flipped_idle_pos = flipped_idle_pos * [-1,1,-1,1,-1,1]
 
     offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
 
@@ -66,7 +66,7 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
 
     i = (i+1) % 500
     if i == 0 or i == 1:
-        print('flip:', flip_y, 'des off', desired_z_offset, ' target offset:', offset_from_target,
+        print('flip:', flip_y, ' target offset:', offset_from_target,
         end = '\n' if flip_y else ' ')
 
 
