@@ -7,6 +7,12 @@ import datetime
 import sys
 import select
 
+dummy = False
+time_dialation = 1 #Useful because sim doesn't run at 100% speed
+if '--dummy' in sys.argv[1:]:
+    dummy = True
+    time_dialation = 0.5
+
 np.set_printoptions(precision=3, suppress=True)
 
 print("Press ctrl+\ to quit process.")
@@ -15,32 +21,40 @@ idle_pos = np.asarray([0.0,0.0,1.5,0.25,0.6,0.35])
 
 def goto_forward():
     arm0.labelRun("forward")
-    arm1.labelRun("forward")
+    if not dummy:
+        arm1.labelRun("forward")
 
 def goto_flat():
     arm0.labelRun("startFlat")
-    arm1.labelRun("startFlat")
+    if not dummy:
+        arm1.labelRun("startFlat")
+
+
+def approach_z_offset_single(arm, desired_z_offset, strength, flip_y, log=False):
+    target_pos = idle_pos + [0,0,0,0,0,desired_z_offset]
+    if flip_y:
+        target_pos = target_pos * [-1,1,-1,1,-1,1]
+
+    offset_from_target = target_pos - get_end_posture(arm)
+    vel_inc_gripper = np.concatenate((offset_from_target * strength, [0]))
+    arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
+    
+    if log:
+        print('flip:', flip_y, ' desired_z_offset:', desired_z_offset,
+        end = ' ')
 
 i = 0
 
-def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
-    global i
-    flipped_idle_pos = idle_pos
-    if flip_y:
-        flipped_idle_pos = flipped_idle_pos * [-1,1,-1,1,-1,1]
-
-    offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
-    vel_inc_gripper = np.concatenate((offset_from_target * strength, [0]))
-    arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
-    i = (i+1) % 500
-    if i == 0 or i == 1:
-        print('flip:', flip_y, ' desired_z_offset:', desired_z_offset,
-        end = '\n' if flip_y else ' ')
-
 def approach_z_offset_both(desired_z_offsets, strength):
-    approach_z_offset_single(arm0, desired_z_offsets[0], strength, False)
-    approach_z_offset_single(arm1, desired_z_offsets[1], strength, True)
+    global i
+    log = i == 0
+    approach_z_offset_single(arm0, desired_z_offsets[0], strength, False, log)
+    if not dummy:
+        approach_z_offset_single(arm1, desired_z_offsets[1], strength, True, log)
 
+    if log:
+        print('')
+    i = (i + 1)% 500
 
 def get_end_posture(arm):
     return unitree_arm_interface.homoToPosture(
@@ -61,10 +75,14 @@ arm0 = unitree_arm_interface.ArmInterface()
 arm1.loopOn()
 arm0.loopOn()
 
+ser = None
+
 # serial config
-ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0, rtscts=True)
+if not dummy:
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0, rtscts=True)
+
 serial_line_buffer = b''
-most_recent_serial_line = ""
+most_recent_serial_line = "0, 0, 0"
 most_recent_serial_time = datetime.datetime(year=1970,month=1,day=1)
 
 # state machine
@@ -88,6 +106,7 @@ while True:
                 elif command == "idle":
                     if mode == "flat":
                         goto_forward()
+                        print('gone to forward')
                     mode = "idle"
 
                 elif command == "run":
@@ -99,11 +118,17 @@ while True:
                 elif command == "report":
                     print("Most recent serial line:", most_recent_serial_line)
 
+                elif 'dline' in command and dummy:
+                    most_recent_serial_line = command[len('dline'):]
+                    print('updated dummy serial to ', most_recent_serial_line)
+
                 else:
                     print("Unrecognised command:", command)
 
         # Handle inbound serial:
-        if ser.inWaiting():
+        if dummy:
+            most_recent_serial_time = datetime.datetime.now()
+        elif ser.inWaiting():
             serial_line_buffer += ser.read(ser.inWaiting())
             if b'\n' in serial_line_buffer:
                 lines = serial_line_buffer.split(b'\n')
@@ -133,8 +158,7 @@ while True:
 
         elif mode == "idle":
             approach_z_offset_both([0, 0], 2.5)
-
-        time.sleep(1/500)
+        time.sleep(arm0._ctrlComp.dt / time_dialation)
     except Exception as e:
         print("Returning to idle due to exception:", e)
         mode = "idle"
