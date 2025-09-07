@@ -17,7 +17,7 @@ np.set_printoptions(precision=3, suppress=True)
 
 print("Press ctrl+\ to quit process.")
 
-idle_pos = np.asarray([0.0,0.0,1.5,0.25,0.6,0.35])
+idle_pos = np.asarray([0.0,0.0,1.5,0.25,0.5,0.35])
 
 def goto_forward():
     arm0.labelRun("forward")
@@ -31,7 +31,7 @@ def goto_flat():
 
 
 def approach_z_offset_single(arm, desired_z_offset, strength, flip_y, log=False):
-    target_pos = idle_pos + [0,0,0,0,0,desired_z_offset]
+    target_pos = idle_pos + [0,0,0,0,-desired_z_offset/2,desired_z_offset]
     if flip_y:
         target_pos = target_pos * [-1,1,-1,1,-1,1]
 
@@ -106,7 +106,6 @@ while True:
                 elif command == "idle":
                     if mode == "flat":
                         goto_forward()
-                        print('gone to forward')
                     mode = "idle"
 
                 elif command == "run":
@@ -154,7 +153,7 @@ while True:
             approach_z_offset_both([
                 determine_z_offset(serial_split[0]),
                 determine_z_offset(serial_split[2])
-            ], 10)
+            ], 20)
 
         elif mode == "idle":
             approach_z_offset_both([0, 0], 2.5)
