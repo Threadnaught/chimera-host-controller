@@ -11,8 +11,7 @@ np.set_printoptions(precision=3, suppress=True)
 
 print("Press ctrl+\ to quit process.")
 
-idle_pos = np.asarray([-0.1,-0.4,-0.25,0.2,0.2,0.55])
-
+idle_pos = np.asarray([0.0,0.0,1.5,0.25,0.6,0.35])
 
 def goto_forward():
     arm0.labelRun("forward")
@@ -22,15 +21,21 @@ def goto_flat():
     arm0.labelRun("startFlat")
     arm1.labelRun("startFlat")
 
+i = 0
 
 def approach_z_offset_single(arm, desired_z_offset, strength, flip_y):
+    global i
     flipped_idle_pos = idle_pos
     if flip_y:
-        flipped_idle_pos = flipped_idle_pos * [1,1,1,1,-1,1]
+        flipped_idle_pos = flipped_idle_pos * [-1,1,-1,1,-1,1]
 
     offset_from_target = (flipped_idle_pos + [0,0,0,0,0,desired_z_offset]) - get_end_posture(arm)
     vel_inc_gripper = np.concatenate((offset_from_target * strength, [0]))
     arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
+    i = (i+1) % 500
+    if i == 0 or i == 1:
+        print('flip:', flip_y, ' desired_z_offset:', desired_z_offset,
+        end = '\n' if flip_y else ' ')
 
 def approach_z_offset_both(desired_z_offsets, strength):
     approach_z_offset_single(arm0, desired_z_offsets[0], strength, False)
@@ -42,7 +47,9 @@ def get_end_posture(arm):
         arm._ctrlComp.armModel.forwardKinematics(
             arm.lowstate.getQ(), 6)
     )
-  
+
+def determine_z_offset(angle):
+    return -min(abs(angle) / 300, 0.3)
 
 # arm config
 ARM_1_UDP = unitree_arm_interface.UDPPort("127.0.0.1", 8073, 8074, unitree_arm_interface.RECVSTATE_LENGTH, unitree_arm_interface.BlockYN.NO, 500000)
@@ -117,15 +124,15 @@ while True:
                 print("Switching to idle due to loss of communication with microcontroller")
                 mode = "idle"
             
-            angle = float(most_recent_serial_line.split(",")[2])
-            desired_z_offset = -min(abs(angle) / 600, 0.2)
-
-            # print(desired_z_offset)
+            serial_split = [float(x) for x in most_recent_serial_line.split(",")]
             
-            approach_z_offset_both([-0.05, -0.05], 2.5)
+            approach_z_offset_both([
+                determine_z_offset(serial_split[0]),
+                determine_z_offset(serial_split[2])
+            ], 10)
 
         elif mode == "idle":
-            approach_z_offset_both([0, 0], 5)
+            approach_z_offset_both([0, 0], 2.5)
 
         time.sleep(1/500)
     except Exception as e:
