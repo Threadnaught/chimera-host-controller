@@ -66,6 +66,7 @@ def determine_z_offset(angle):
     return -min(abs(angle) / 300, 0.3)
 
 # arm config
+# IF YOU GET AN ERROR ON THIS LINE, LOOK AT THE README!!!!!!!!!!
 ARM_1_UDP = unitree_arm_interface.UDPPort("127.0.0.1", 8073, 8074, unitree_arm_interface.RECVSTATE_LENGTH, unitree_arm_interface.BlockYN.NO, 500000)
 arm1 =  unitree_arm_interface.ArmInterface()
 arm1._ctrlComp.udp = ARM_1_UDP
