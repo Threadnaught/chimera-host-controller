@@ -23,7 +23,7 @@ np.set_printoptions(precision=3, suppress=True)
 
 print("Press ctrl+\ to quit process.")
 
-idle_pos = np.asarray([0.0,0.0,1.5,0.25,0.5,0.35])
+idle_pos = np.asarray([0.0,0.0,1.5,0.25,0.5,0.225])
 
 def goto_forward():
     arm0.labelRun("forward")
@@ -40,11 +40,12 @@ ema_alpha = 0.1
 
 cartesian_cmds_moving_average = {True:np.zeros([7]), False:np.zeros([7])}
 
-def control_loop_single(arm, arm_angle, strength, flip_y, log=False):
+def control_loop_single(arm, arm_angle, offset_from_accel, strength, flip_y, log=False):
     arm_influence = determine_arm_influence(arm_angle)
     target_pos = idle_pos + [0,0,0,0,-arm_influence*0.75,arm_influence]
     if flip_y:
         target_pos = target_pos * [-1,1,-1,1,-1,1]
+    target_pos = target_pos + np.concatenate(([0,0,0], offset_from_accel))
 
     offset_from_target = target_pos - get_end_posture(arm)
     cartesian_cmd_instantaneous = np.concatenate((offset_from_target * strength, [0]))
@@ -56,17 +57,18 @@ def control_loop_single(arm, arm_angle, strength, flip_y, log=False):
     arm.cartesianCtrlCmd(cartesian_cmds_moving_average[flip_y], 0.05, 1)
     
     if log:
-        print('flip:', flip_y, ' arm_influence:', arm_influence,
+        print('flip:', flip_y, ' arm_influence:', arm_influence, 'offset_from_accel:', offset_from_accel,
         end = ' ')
 
 i = 0
 
-def control_loop_both(arm_angles, strength):
+def control_loop_both(arm_angles, torso_accel, strength):
     global i
     log = i == 0
-    control_loop_single(arm0, arm_angles[0], strength, False, log)
+    offset_from_accel = -np.asarray(torso_accel) / 7.5
+    control_loop_single(arm0, arm_angles[0], offset_from_accel, strength, False, log)
     if not dummy:
-        control_loop_single(arm1, arm_angles[1], strength, True, log)
+        control_loop_single(arm1, arm_angles[1], offset_from_accel, strength, True, log)
 
     if log:
         print('')
@@ -99,7 +101,7 @@ if not dummy:
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0, rtscts=True)
 
 serial_line_buffer = b''
-most_recent_serial_line = "0, 0, 0"
+most_recent_serial_line = "0, 0, 0, 0, 0"
 most_recent_serial_time = datetime.datetime(year=1970,month=1,day=1)
 
 # state machine
@@ -172,10 +174,10 @@ while True:
             if reverse_arms:
                 left_angle, right_angle = right_angle, left_angle
                 
-            control_loop_both([left_angle, right_angle], 2.5)
+            control_loop_both([left_angle, right_angle], serial_split[1:4], 20)
 
         elif mode == "idle":
-            control_loop_both([0, 0], 2.5)
+            control_loop_both([0, 0], [0, 0, -1], 2.5)
         time.sleep(arm0._ctrlComp.dt / time_dialation)
     except Exception as e:
         print("Returning to idle due to exception:", e)
