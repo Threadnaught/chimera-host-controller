@@ -8,10 +8,16 @@ import sys
 import select
 
 dummy = False
+reverse_arms = False
 time_dialation = 1 #Useful because sim doesn't run at 100% speed
 if '--dummy' in sys.argv[1:]:
+    print('Launching in DUMMY mode. use `dline [left arm pitch], [torso pitch], [right arm pitch]` to set angles')
     dummy = True
     time_dialation = 0.5
+
+if '--reverse' in sys.argv[1:]:
+    print('launching in arms reversed mode. Right operator arm will now drive left robot arm and vice-versa.')
+    reverse_arms = True
 
 np.set_printoptions(precision=3, suppress=True)
 
@@ -29,15 +35,24 @@ def goto_flat():
     if not dummy:
         arm1.labelRun("startFlat")
 
+#exponential moving average parameter
+ema_alpha = 0.1
+
+cartesian_cmds_moving_average = {True:np.zeros([7]), False:np.zeros([7])}
 
 def approach_z_offset_single(arm, desired_z_offset, strength, flip_y, log=False):
-    target_pos = idle_pos + [0,0,0,0,-desired_z_offset/2,desired_z_offset]
+    target_pos = idle_pos + [0,0,0,0,-desired_z_offset*0.75,desired_z_offset]
     if flip_y:
         target_pos = target_pos * [-1,1,-1,1,-1,1]
 
     offset_from_target = target_pos - get_end_posture(arm)
-    vel_inc_gripper = np.concatenate((offset_from_target * strength, [0]))
-    arm.cartesianCtrlCmd(vel_inc_gripper, 0.05, 1)
+    cartesian_cmd_instantaneous = np.concatenate((offset_from_target * strength, [0]))
+
+    cartesian_cmds_moving_average[flip_y] = \
+        (cartesian_cmds_moving_average[flip_y] * (1-ema_alpha)) + \
+        (cartesian_cmd_instantaneous * ema_alpha)
+
+    arm.cartesianCtrlCmd(cartesian_cmds_moving_average[flip_y], 0.05, 1)
     
     if log:
         print('flip:', flip_y, ' desired_z_offset:', desired_z_offset,
@@ -63,7 +78,7 @@ def get_end_posture(arm):
     )
 
 def determine_z_offset(angle):
-    return -min(abs(angle) / 300, 0.3)
+    return -min(abs(angle) / 275, 0.3)
 
 # arm config
 # IF YOU GET AN ERROR ON THIS LINE, LOOK AT THE README!!!!!!!!!!
@@ -150,11 +165,13 @@ while True:
                 mode = "idle"
             
             serial_split = [float(x) for x in most_recent_serial_line.split(",")]
+
+            left_zoff, right_zoff = determine_z_offset(serial_split[0]), determine_z_offset(serial_split[2])
             
-            approach_z_offset_both([
-                determine_z_offset(serial_split[0]),
-                determine_z_offset(serial_split[2])
-            ], 20)
+            if reverse_arms:
+                left_zoff, right_zoff = right_zoff, left_zoff
+                
+            approach_z_offset_both([left_zoff, right_zoff], 20)
 
         elif mode == "idle":
             approach_z_offset_both([0, 0], 2.5)
