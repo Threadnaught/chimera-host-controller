@@ -23,7 +23,7 @@ np.set_printoptions(precision=3, suppress=True)
 
 print("Press ctrl+\ to quit process.")
 
-idle_pos = np.asarray([0.0,0.0,1.5,0.25,0.5,0.225])
+idle_pos = np.asarray([0.0,0.0,1.5,0.15,0.5,0.225])
 
 def goto_forward():
     arm0.labelRun("forward")
@@ -65,7 +65,7 @@ i = 0
 def control_loop_both(arm_angles, torso_accel, strength):
     global i
     log = i == 0
-    offset_from_accel = -np.asarray(torso_accel) / 7.5
+    offset_from_accel = -np.asarray(np.clip(torso_accel,-1,1)) / 5
     control_loop_single(arm0, arm_angles[0], offset_from_accel, strength, False, log)
     if not dummy:
         control_loop_single(arm1, arm_angles[1], offset_from_accel, strength, True, log)
