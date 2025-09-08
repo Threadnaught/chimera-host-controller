@@ -40,8 +40,9 @@ ema_alpha = 0.1
 
 cartesian_cmds_moving_average = {True:np.zeros([7]), False:np.zeros([7])}
 
-def approach_z_offset_single(arm, desired_z_offset, strength, flip_y, log=False):
-    target_pos = idle_pos + [0,0,0,0,-desired_z_offset*0.75,desired_z_offset]
+def control_loop_single(arm, arm_angle, strength, flip_y, log=False):
+    arm_influence = determine_arm_influence(arm_angle)
+    target_pos = idle_pos + [0,0,0,0,-arm_influence*0.75,arm_influence]
     if flip_y:
         target_pos = target_pos * [-1,1,-1,1,-1,1]
 
@@ -55,17 +56,17 @@ def approach_z_offset_single(arm, desired_z_offset, strength, flip_y, log=False)
     arm.cartesianCtrlCmd(cartesian_cmds_moving_average[flip_y], 0.05, 1)
     
     if log:
-        print('flip:', flip_y, ' desired_z_offset:', desired_z_offset,
+        print('flip:', flip_y, ' arm_influence:', arm_influence,
         end = ' ')
 
 i = 0
 
-def approach_z_offset_both(desired_z_offsets, strength):
+def control_loop_both(arm_angles, strength):
     global i
     log = i == 0
-    approach_z_offset_single(arm0, desired_z_offsets[0], strength, False, log)
+    control_loop_single(arm0, arm_angles[0], strength, False, log)
     if not dummy:
-        approach_z_offset_single(arm1, desired_z_offsets[1], strength, True, log)
+        control_loop_single(arm1, arm_angles[1], strength, True, log)
 
     if log:
         print('')
@@ -77,7 +78,7 @@ def get_end_posture(arm):
             arm.lowstate.getQ(), 6)
     )
 
-def determine_z_offset(angle):
+def determine_arm_influence(angle):
     return -min(abs(angle) / 275, 0.3)
 
 # arm config
@@ -159,22 +160,22 @@ while True:
         if mode == "run":
             if \
                 (datetime.datetime.now() - most_recent_serial_time) > datetime.timedelta(seconds=0.1) \
-                or most_recent_serial_line.count(',') != 2:
+                or most_recent_serial_line.count(',') != 4:
 
                 print("Switching to idle due to loss of communication with microcontroller")
                 mode = "idle"
             
             serial_split = [float(x) for x in most_recent_serial_line.split(",")]
 
-            left_zoff, right_zoff = determine_z_offset(serial_split[0]), determine_z_offset(serial_split[2])
+            left_angle, right_angle = serial_split[0], serial_split[4]
             
             if reverse_arms:
-                left_zoff, right_zoff = right_zoff, left_zoff
+                left_angle, right_angle = right_angle, left_angle
                 
-            approach_z_offset_both([left_zoff, right_zoff], 20)
+            control_loop_both([left_angle, right_angle], 2.5)
 
         elif mode == "idle":
-            approach_z_offset_both([0, 0], 2.5)
+            control_loop_both([0, 0], 2.5)
         time.sleep(arm0._ctrlComp.dt / time_dialation)
     except Exception as e:
         print("Returning to idle due to exception:", e)
